@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>VR Mini Game: Сбор объектов (Collision)</title>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #gameOverScreen {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            z-index: 1000;
+            width: 300px;
+        }
+        #restartButton {
+            background: linear-gradient(45deg, #4CAF50, #2E7D32);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: transform 0.2s;
+        }
+        #restartButton:hover {
+            transform: scale(1.05);
+            background: linear-gradient(45deg, #66BB6A, #388E3C);
+        }
+        .instructions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameOverScreen">
+        <h2>🎮 Игра завершена!</h2>
+        <p>Собрано объектов: <span id="finalScore" style="font-size: 24px; color: #FFD700;">0</span></p>
+        <button id="restartButton">🔄 Играть снова</button>
+    </div>
+
+    <div class="instructions">
+        <strong>Управление:</strong><br>
+        • WASD - движение<br>
+        • Мышь - осмотр<br>
+        • <strong>Подойдите к объекту, чтобы собрать его</strong><br>
+        <span id="objectCount" style="color: #4FC3F7;">Объектов: 0/13</span>
+    </div>
+
+    <script>
+        // ========== НАСТРОЙКИ ИГРЫ ==========
+        const GAME_SETTINGS = {
+            totalTime: 60,
+            totalObjects: 12, // +1 спец. модель = 13
+            colors: [
+                '#FF5252', '#FF4081', '#E040FB', '#7C4DFF', 
+                '#536DFE', '#448AFF', '#40C4FF', '#18FFFF',
+                '#64FFDA', '#69F0AE', '#B2FF59', '#EEFF41'
+            ],
+            shapes: ['box', 'sphere', 'cylinder', 'cone', 'torus', 'octahedron']
+        };
+
+        let gameState = {
+            active: true,
+            score: 0,
+            timeLeft: GAME_SETTINGS.totalTime,
+            timerInterval: null
+        };
+
+        // ========== КОМПОНЕНТ ДЛЯ СБОРА (ОБНОВЛЕННЫЙ) ==========
+        AFRAME.registerComponent('collectible', {
+            schema: {
+                color: { type: 'string', default: '#4CAF50' },
+                shape: { type: 'string', default: 'box' },
+                threshold: { type: 'number', default: 2.0 } // Дистанция сбора (в метрах)
+            },
+            
+            init: function () {
+                this.isCollected = false;
+                // Получаем ссылку на камеру (игрока)
+                this.player = document.querySelector('[camera]');
+                
+                // Добавляем анимацию пульсации (если это не модель)
+                if (!this.el.getAttribute('gltf-model')) {
+                    this.el.setAttribute('animation', {
+                        property: 'scale',
+                        from: '1 1 1',
+                        to: '1.1 1.1 1.1',
+                        dir: 'alternate',
+                        loop: true,
+                        dur: 1000 + Math.random() * 1000
+                    });
+                }
+            },
+
+            // tick выполняется каждый кадр (около 60-90 раз в секунду)
+            tick: function () {
+                if (!gameState.active || this.isCollected || !this.player) return;
+
+                // Получаем позиции игрока и объекта
+                const playerPos = this.player.object3D.position;
+                const objectPos = this.el.object3D.position;
+
+                // Считаем дистанцию
+                const distance = playerPos.distanceTo(objectPos);
+
+                // Если дистанция меньше порога - собираем объект
+                if (distance < this.data.threshold) {
+                    this.collect();
+                }
+            },
+            
+            collect: function () {
+                if (this.isCollected) return;
+                this.isCollected = true;
+                
+                // Анимация исчезновения
+                this.el.setAttribute('animation', {
+                    property: 'scale',
+                    to: '0 0 0',
+                    dur: 200,
+                    easing: 'easeInQuad'
+                });
+                
+                // Удаляем после анимации
+                setTimeout(() => {
+                    if (this.el.parentNode) {
+                        this.el.parentNode.removeChild(this.el);
+                    }
+                }, 200);
+                
+                // Обновляем счет
+                this.updateScore();
+            },
+            
+            updateScore: function () {
+                gameState.score++;
+                document.querySelector('#score').setAttribute('value', 'Счет: ' + gameState.score);
+                document.querySelector('#objectCount').textContent = `Объектов: ${gameState.score}/${GAME_SETTINGS.totalObjects + 1}`;
+                
+                if (gameState.score >= GAME_SETTINGS.totalObjects + 1) {
+                    endGame(true);
+                }
+            }
+        });
+
+        // ========== УПРАВЛЕНИЕ ИГРОЙ ==========
+        function initGame() {
+            gameState.score = 0;
+            gameState.timeLeft = GAME_SETTINGS.totalTime;
+            gameState.active = true;
+            
+            // Обновляем UI
+            document.querySelector('#score').setAttribute('value', 'Счет: 0');
+            document.querySelector('#objectCount').textContent = `Объектов: 0/${GAME_SETTINGS.totalObjects + 1}`;
+            document.querySelector('#timer').setAttribute('value', 'Время: ' + gameState.timeLeft);
+            document.getElementById('gameOverScreen').style.display = 'none';
+            
+            clearInterval(gameState.timerInterval);
+            gameState.timerInterval = setInterval(updateTimer, 1000);
+        }
+        
+        function updateTimer() {
+            if (!gameState.active) return;
+            
+            gameState.timeLeft--;
+            document.querySelector('#timer').setAttribute('value', 'Время: ' + gameState.timeLeft);
+            
+            if (gameState.timeLeft <= 0) {
+                clearInterval(gameState.timerInterval);
+                endGame(false);
+            }
+            
+            if (gameState.timeLeft <= 10) {
+                document.querySelector('#timer').setAttribute('color', '#FF5252');
+            }
+        }
+        
+        function endGame(isWin) {
+            gameState.active = false;
+            clearInterval(gameState.timerInterval);
+            
+            document.getElementById('finalScore').textContent = gameState.score;
+            
+            if (isWin) {
+                document.querySelector('#gameOverScreen h2').textContent = '🎉 Победа!';
+                document.querySelector('#gameOverScreen p').innerHTML = 
+                    `Вы собрали все объекты!<br>
+                     <span style="color: #FFD700; font-size: 24px;">Отличный результат!</span>`;
+            } else {
+                 document.querySelector('#gameOverScreen h2').textContent = '⌛ Время вышло!';
+            }
+            
+            document.getElementById('gameOverScreen').style.display = 'block';
+        }
+
+        // ========== ГЕНЕРАЦИЯ ОБЪЕКТОВ ==========
+        function generateObjects() {
+            const scene = document.querySelector('a-scene');
+            document.querySelectorAll('[collectible]:not(#bonus-model)').forEach(el => {
+                if(el.parentNode) el.parentNode.removeChild(el);
+            });
+
+            // Восстанавливаем модель утки
+            const bonusModel = document.querySelector('#bonus-model');
+            if (!bonusModel && gameState.active) {
+                const newModel = document.createElement('a-entity');
+                newModel.setAttribute('id', 'bonus-model');
+                newModel.setAttribute('gltf-model', '#duck-model');
+                newModel.setAttribute('position', '0 0.5 -2');
+                newModel.setAttribute('scale', '0.5 0.5 0.5');
+                newModel.setAttribute('collectible', '');
+                newModel.setAttribute('animation', 'property: rotation; to: 0 360 0; loop: true; dur: 5000; easing: linear');
+                scene.appendChild(newModel);
+            }
+
+            const positions = [
+                [-5, 1, -3], [-3, 0.5, -6], [-1, 1.5, -4],
+                [1, 0.8, -7], [3, 1.2, -3], [5, 0.5, -5],
+                [-4, 1, -8], [0, 1.5, -9], [4, 0.7, -8],
+                [-2, 1, -10], [2, 1.3, -10], [0, 2, -6]
+            ];
+            
+            positions.forEach((pos, index) => {
+                const shapeType = GAME_SETTINGS.shapes[index % GAME_SETTINGS.shapes.length];
+                const color = GAME_SETTINGS.colors[index];
+                
+                let entity;
+                
+                switch(shapeType) {
+                    case 'box': entity = document.createElement('a-box'); entity.setAttribute('width', '0.8'); entity.setAttribute('height', '0.8'); entity.setAttribute('depth', '0.8'); break;
+                    case 'sphere': entity = document.createElement('a-sphere'); entity.setAttribute('radius', '0.5'); break;
+                    case 'cylinder': entity = document.createElement('a-cylinder'); entity.setAttribute('radius', '0.4'); entity.setAttribute('height', '1'); break;
+                    case 'cone': entity = document.createElement('a-cone'); entity.setAttribute('radius-bottom', '0.4'); entity.setAttribute('radius-top', '0.1'); entity.setAttribute('height', '1'); break;
+                    case 'torus': entity = document.createElement('a-torus'); entity.setAttribute('radius', '0.5'); entity.setAttribute('radius-tubular', '0.1'); entity.setAttribute('arc', '360'); break;
+                    case 'octahedron': entity = document.createElement('a-octahedron'); entity.setAttribute('radius', '0.5'); break;
+                }
+                
+                entity.setAttribute('position', {x: pos[0], y: pos[1], z: pos[2]});
+                entity.setAttribute('color', color);
+                entity.setAttribute('collectible', `color: ${color}; shape: ${shapeType}`);
+                entity.setAttribute('shadow', '');
+                
+                entity.setAttribute('animation__rotate', {
+                    property: 'rotation',
+                    to: `${Math.random() * 360} ${Math.random() * 360} ${Math.random() * 360}`,
+                    dur: 3000 + Math.random() * 4000,
+                    loop: true,
+                    easing: 'linear'
+                });
+                
+                entity.setAttribute('animation__float', {
+                    property: 'position',
+                    from: `${pos[0]} ${pos[1] - 0.2} ${pos[2]}`,
+                    to: `${pos[0]} ${pos[1] + 0.2} ${pos[2]}`,
+                    dir: 'alternate',
+                    dur: 2000 + Math.random() * 2000,
+                    loop: true,
+                    easing: 'easeInOutSine'
+                });
+                
+                scene.appendChild(entity);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initGame();
+            generateObjects();
+            document.getElementById('restartButton').addEventListener('click', () => {
+                initGame();
+                generateObjects();
+            });
+        });
+    </script>
+
+    <a-scene>
+        <!-- <a-assets>
+            <a-asset-item id="duck-model" src="https://cdn.glitch.global/c68102b3-57da-4e4c-b16a-7f61b369c62b/Duck.glb?v=1707921822822"></a-asset-item>
+        </a-assets> -->
+
+        <a-sky color="#87CEEB"></a-sky>
+        
+        <a-plane 
+            position="0 0 -4" 
+            rotation="-90 0 0" 
+            width="30" 
+            height="30" 
+            color="#5D4037"
+            roughness="0.8"
+            src="https://cdn.aframe.io/a-painter/images/floor.jpg"
+            repeat="10 10">
+        </a-plane>
+
+        <a-entity 
+            id="bonus-model"
+            gltf-model="#duck-model" 
+            position="0 0.5 -2" 
+            scale="0.5 0.5 0.5"
+            collectible
+            animation="property: rotation; to: 0 360 0; loop: true; dur: 5000; easing: linear">
+        </a-entity>
+        
+        <a-box position="-10 1 -10" width="2" height="4" depth="2" color="#795548" shadow></a-box>
+        <a-box position="10 1 -10" width="2" height="3" depth="2" color="#795548" shadow></a-box>
+        <a-sphere position="-12 3 -12" radius="1" color="#FFEB3B" emissive="#FFEB3B" emissive-intensity="0.5"></a-sphere>
+        <a-sphere position="12 3 -12" radius="1" color="#FFEB3B" emissive="#FFEB3B" emissive-intensity="0.5"></a-sphere>
+
+        <a-entity camera look-controls wasd-controls="acceleration: 65" position="0 1.6 0">
+            <a-entity 
+                position="0 0 -1"
+                geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
+                material="color: #FFF; shader: flat; opacity: 0.5">
+            </a-entity>
+        </a-entity>
+
+        <a-light type="ambient" color="#FFFFFF" intensity="0.6"></a-light>
+        <a-light type="directional" color="#FFFFFF" intensity="0.8" position="5 10 5" cast-shadow></a-light>
+        <a-light type="point" color="#FFE57F" intensity="0.5" position="-5 3 -5" distance="10"></a-light>
+        <a-light type="point" color="#B3E5FC" intensity="0.5" position="5 3 -5" distance="10"></a-light>
+
+        <a-text 
+            id="score" 
+            value="Счет: 0" 
+            position="-1.5 2.5 -3" 
+            align="center" 
+            color="#FFFFFF" 
+            scale="1.8 1.8 1.8"
+            background="color: rgba(0,0,0,0.7); padding: 0.3; opacity: 0.9">
+        </a-text>
+        
+        <a-text 
+            id="timer" 
+            value="Время: 60" 
+            position="1.5 2.5 -3" 
+            align="center" 
+            color="#FFFFFF" 
+            scale="1.8 1.8 1.8"
+            background="color: rgba(0,0,0,0.7); padding: 0.3; opacity: 0.9">
+        </a-text>
+        
+        <a-text 
+            value="🎯 СОБЕРИ ВСЕ ФИГУРЫ" 
+            position="0 2.8 -3" 
+            align="center" 
+            color="#FFD740" 
+            scale="2 2 2"
+            background="color: rgba(25,25,112,0.8); padding: 0.4">
+        </a-text>
+
+        <a-entity light="type: directional; color: #FFF; intensity: 0.5" position="-1 5 -2" cast-shadow></a-entity>
+    </a-scene>
+</body>
+</html>
+
